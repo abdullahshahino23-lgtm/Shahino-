@@ -1,0 +1,59 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.active == true;
+    }
+
+    // الزوار يمكنهم إرسال طلبات فقط، ولا يمكنهم قراءة الطلبات أو تعديلها أو حذفها.
+    match /orders/{orderId} {
+      allow create: if
+        request.resource.data.keys().hasAll(['name', 'email', 'service', 'message', 'status', 'createdAt'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 2
+        && request.resource.data.name.size() <= 100
+        && request.resource.data.email is string
+        && request.resource.data.email.size() <= 160
+        && request.resource.data.service is string
+        && request.resource.data.service.size() <= 120
+        && request.resource.data.message is string
+        && request.resource.data.message.size() >= 10
+        && request.resource.data.message.size() <= 3000
+        && request.resource.data.status == 'new';
+      allow read, update, delete: if isAdmin();
+    }
+
+    // محتوى الموقع يمكن عرضه علنًا، وإدارته للمديرين فقط.
+    match /projects/{itemId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /services/{itemId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /settings/{settingId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // وثائق صلاحيات المديرين لا يقرأها أو يغيرها إلا مدير فعّال.
+    match /admins/{uid} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow create, update, delete: if isAdmin();
+    }
+
+    // الرفض الافتراضي لأي مجموعات غير معرفة أعلاه.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
